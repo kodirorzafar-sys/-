@@ -1,297 +1,238 @@
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Block Blast 510px</title>
-    <style>
-        :root {
-            --bg: #fdfdfd;
-            --accent: #4834d4;
-            --shadow: rgba(72, 52, 212, 0.15);
-        }
-        body {
-            background: #f0f2f5;
-            margin: 0;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            height: 100vh;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            touch-action: none;
-            overflow: hidden;
-        }
-        /* Фиксированный размер под 510px */
-        #app-container {
-            width: 100%;
-            max-width: 510px;
-            height: 100%;
-            background: var(--bg);
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            position: relative;
-            box-shadow: 0 0 40px rgba(0,0,0,0.1);
-        }
-        #header {
-            width: 100%;
-            padding: 20px 0;
-            text-align: center;
-            background: white;
-        }
-        #score { font-size: 58px; font-weight: 900; color: var(--accent); margin: 0; }
-        #best { font-size: 16px; color: #a0a0a0; font-weight: bold; margin-top: -5px; }
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const scoreEl = document.getElementById('score');
+const bestEl = document.getElementById('best');
 
-        canvas { 
-            touch-action: none;
-            cursor: pointer;
-        }
+const GRID = 8;
+let grid = Array(GRID).fill().map(() => Array(GRID).fill(null));
+let score = 0;
+let bestScore = localStorage.getItem('bb_best_v2') || 0;
+let shapes = [];
+let drag = null;
 
-        #overlay {
-            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(255,255,255,0.9);
-            display: none; flex-direction: column; align-items: center; justify-content: center;
-            z-index: 100;
-        }
-        .btn-restart {
-            background: var(--accent); color: white; border: none;
-            padding: 16px 32px; font-size: 20px; border-radius: 14px;
-            font-weight: bold; cursor: pointer; transition: transform 0.2s;
-        }
-        .btn-restart:active { transform: scale(0.95); }
-    </style>
-</head>
-<body>
+// Координаты цели и текущие координаты (для плавности)
+let targetX = 0, targetY = 0;
+let curX = 0, curY = 0;
 
-<div id="app-container">
-    <div id="header">
-        <h1 id="score">0</h1>
-        <div id="best">РЕКОРД: 0</div>
-    </div>
+let cellSize, boardSize, boardX, boardY, dockY, dockHeight;
 
-    <canvas id="gameCanvas"></canvas>
+const COLORS = [
+    { m: '#FF5E57', s: '#D63031' }, { m: '#1DD1A1', s: '#10AC84' },
+    { m: '#54A0FF', s: '#2E86DE' }, { m: '#FECA57', s: '#FF9F43' },
+    { m: '#5F27CD', s: '#341F97' }, { m: '#00d2d3', s: '#01a3a4' }
+];
 
-    <div id="overlay">
-        <h2 style="color: #2d3436; font-size: 32px;">ХОДОВ НЕТ</h2>
-        <p id="final-score" style="font-size: 24px; color: var(--accent); font-weight: bold; margin-bottom: 30px;">0</p>
-        <button class="btn-restart" onclick="location.reload()">ИГРАТЬ СНОВА</button>
-    </div>
-</div>
-
-<script>
-    const canvas = document.getElementById('gameCanvas');
-    const ctx = canvas.getContext('2d');
-    const scoreEl = document.getElementById('score');
-    const bestEl = document.getElementById('best');
-
-    const GRID = 8;
-    const APP_WIDTH = 510;
-    let cellSize, boardSize, dockY;
-    
-    let grid = Array(GRID).fill().map(() => Array(GRID).fill(null));
-    let score = 0;
-    let bestScore = localStorage.getItem('bb510_best') || 0;
-    let shapes = [];
-    let drag = null;
-    let mX = 0, mY = 0;
-
-    const COLORS = [
-        { m: '#FF5E57', s: '#D63031' }, { m: '#1DD1A1', s: '#10AC84' },
-        { m: '#54A0FF', s: '#2E86DE' }, { m: '#FECA57', s: '#FF9F43' },
-        { m: '#5F27CD', s: '#341F97' }, { m: '#00d2d3', s: '#01a3a4' }
+function getRandomShape() {
+    const sets = [
+        [[0,0],[1,0],[2,0],[0,1],[1,1],[2,1],[0,2],[1,2],[2,2]], // 3x3
+        [[0,0],[1,0],[2,0],[0,1],[1,1],[2,1]], // 3x2
+        [[0,0],[1,0],[0,1],[1,1]], // 2x2
+        [[0,0],[0,1],[1,1]], // L
+        [[0,0],[1,0],[2,0]], // 3x1
+        [[0,0],[0,1],[0,2]], // 1x3
+        [[0,0],[1,0],[1,1],[2,1]], // Z
+        [[0,0]], // 1x1
+        [[0,0],[1,0]] // 2x1
     ];
+    return sets[Math.floor(Math.random() * sets.length)];
+}
 
-    function getRandomShape() {
-        const sets = [
-            [[0,0],[1,0],[2,0],[0,1],[1,1],[2,1],[0,2],[1,2],[2,2]], // 3x3
-            [[0,0],[1,0],[2,0],[0,1],[1,1],[2,1]], // 3x2
-            [[0,0],[1,0],[0,1],[1,1]], // 2x2
-            [[0,0],[0,1],[1,1]], // L
-            [[0,0],[1,0],[2,0]], // 3x1
-            [[0,0],[0,1],[0,2]], // 1x3
-            [[0,0],[1,0],[1,1],[2,1]] // Z
-        ];
-        return sets[Math.floor(Math.random() * sets.length)];
-    }
+function resize() {
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.parentElement.getBoundingClientRect();
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    ctx.scale(dpr, dpr);
+    boardSize = rect.width * 0.94;
+    cellSize = boardSize / GRID;
+    boardX = (rect.width - boardSize) / 2;
+    boardY = 10;
+    dockY = boardY + boardSize + 40;
+    dockHeight = rect.height - dockY;
+    bestEl.innerText = `РЕКОРД: ${bestScore}`;
+}
 
-    function init() {
-        // Установка размеров под 510px
-        const scale = window.innerWidth / APP_WIDTH;
-        const realWidth = Math.min(window.innerWidth, APP_WIDTH);
-        
-        canvas.width = realWidth * 2;
-        canvas.height = window.innerHeight * 2;
-        canvas.style.width = realWidth + 'px';
-        canvas.style.height = window.innerHeight + 'px';
-        ctx.scale(2, 2);
-
-        boardSize = realWidth * 0.92;
-        cellSize = boardSize / GRID;
-        dockY = boardSize + 150;
-        bestEl.innerText = `РЕКОРД: ${bestScore}`;
-
-        spawnShapes();
-        render();
-    }
-
-    function spawnShapes() {
-        shapes = [];
-        for (let i = 0; i < 3; i++) {
-            shapes.push({
-                blocks: getRandomShape(),
-                color: COLORS[Math.floor(Math.random() * COLORS.length)],
-                active: true,
-                slot: i
-            });
-        }
-        if (!canMove()) gameOver();
-    }
-
-    function canFit(shape, gx, gy) {
-        return shape.blocks.every(b => {
-            let nx = gx + b[0], ny = gy + b[1];
-            return nx >= 0 && nx < GRID && ny >= 0 && ny < GRID && !grid[ny][nx];
+function spawnShapes() {
+    shapes = [];
+    for (let i = 0; i < 3; i++) {
+        shapes.push({
+            blocks: getRandomShape(),
+            color: COLORS[Math.floor(Math.random() * COLORS.length)],
+            active: true,
+            slot: i
         });
     }
+    if (!canMoveAny()) gameOver();
+}
 
-    function canMove() {
-        return shapes.some(s => {
-            if (!s.active) return false;
-            for (let r = 0; r < GRID; r++) {
-                for (let c = 0; c < GRID; c++) {
-                    if (canFit(s, c, r)) return true;
-                }
-            }
-            return false;
-        });
-    }
+function canFit(shape, gx, gy) {
+    return shape.blocks.every(b => {
+        let nx = gx + b[0], ny = gy + b[1];
+        return nx >= 0 && nx < GRID && ny >= 0 && ny < GRID && !grid[ny][nx];
+    });
+}
 
-    function drawBlock(x, y, color, size, alpha = 1) {
-        ctx.save();
-        ctx.globalAlpha = alpha;
-        ctx.fillStyle = color.m;
-        ctx.beginPath();
-        ctx.roundRect(x + 2, y + 2, size - 4, size - 4, 8);
-        ctx.fill();
-        // Глянцевый эффект
-        ctx.fillStyle = 'rgba(255,255,255,0.2)';
-        ctx.fillRect(x + 6, y + 6, size - 12, size/4);
-        ctx.restore();
-    }
-
-    function render() {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        const startX = (parseFloat(canvas.style.width) - boardSize) / 2;
-        const startY = 20;
-
-        // Отрисовка пустой сетки
+function canMoveAny() {
+    return shapes.some(s => {
+        if (!s.active) return false;
         for (let r = 0; r < GRID; r++) {
             for (let c = 0; c < GRID; c++) {
-                ctx.fillStyle = '#f1f3f6';
-                ctx.beginPath();
-                ctx.roundRect(startX + c*cellSize + 1, startY + r*cellSize + 1, cellSize - 2, cellSize - 2, 8);
-                ctx.fill();
-                if (grid[r][c]) drawBlock(startX + c*cellSize, startY + r*cellSize, grid[r][c], cellSize);
+                if (canFit(s, c, r)) return true;
             }
         }
+        return false;
+    });
+}
 
-        // Отрисовка фигур в доке
-        shapes.forEach(s => {
-            if (!s.active || s === drag) return;
-            const sSize = cellSize * 0.65;
-            const slotW = parseFloat(canvas.style.width) / 3;
-            const x = s.slot * slotW + (slotW/2) - (sSize);
-            s.blocks.forEach(b => drawBlock(x + b[0]*sSize, dockY + b[1]*sSize, s.color, sSize));
-        });
+function drawBlock(x, y, color, size, alpha = 1) {
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = color.m;
+    ctx.beginPath();
+    const r = size * 0.2;
+    ctx.roundRect(x + 1.5, y + 1.5, size - 3, size - 3, r);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.15)';
+    ctx.fillRect(x + size*0.2, y + size*0.15, size*0.6, size*0.15);
+    ctx.restore();
+}
 
-        // Эффект перетаскивания
-        if (drag) {
-            const gx = Math.round((mX - startX - cellSize/2) / cellSize);
-            const gy = Math.round((mY - startY - cellSize/2) / cellSize);
-            
-            // Подсветка места (Ghost)
-            if (canFit(drag, gx, gy)) {
-                drag.blocks.forEach(b => drawBlock(startX + (gx+b[0])*cellSize, startY + (gy+b[1])*cellSize, drag.color, cellSize, 0.3));
-            }
+function render() {
+    const rect = canvas.parentElement.getBoundingClientRect();
+    ctx.clearRect(0, 0, rect.width, rect.height);
 
-            // Сама фигура под пальцем
-            drag.blocks.forEach(b => drawBlock(mX + b[0]*cellSize - cellSize/2, mY + b[1]*cellSize - cellSize/2, drag.color, cellSize));
+    // Сетка
+    for (let r = 0; r < GRID; r++) {
+        for (let c = 0; c < GRID; c++) {
+            ctx.fillStyle = '#f0f0f0';
+            ctx.beginPath();
+            ctx.roundRect(boardX + c*cellSize + 1, boardY + r*cellSize + 1, cellSize - 2, cellSize - 2, 6);
+            ctx.fill();
+            if (grid[r][c]) drawBlock(boardX + c*cellSize, boardY + r*cellSize, grid[r][c], cellSize);
         }
-
-        requestAnimationFrame(render);
     }
 
-    function handleEnd() {
-        if (!drag) return;
-        const startX = (parseFloat(canvas.style.width) - boardSize) / 2;
-        const startY = 20;
-        const gx = Math.round((mX - startX - cellSize/2) / cellSize);
-        const gy = Math.round((mY - startY - cellSize/2) / cellSize);
+    // Фигуры в доке
+    const slotW = rect.width / 3;
+    shapes.forEach(s => {
+        if (!s.active || s === drag) return;
+        const miniSize = cellSize * 0.7;
+        const sW = Math.max(...s.blocks.map(b => b[0])) * miniSize;
+        const sH = Math.max(...s.blocks.map(b => b[1])) * miniSize;
+        const x = s.slot * slotW + (slotW - sW) / 2 - miniSize/2;
+        const y = dockY + (dockHeight/2 - sH/2) - miniSize/2;
+        s.blocks.forEach(b => drawBlock(x + b[0]*miniSize, y + b[1]*miniSize, s.color, miniSize));
+    });
 
+    // Перетаскивание
+    if (drag) {
+        // Плавное следование (Lerp)
+        curX += (targetX - curX) * 0.25;
+        curY += (targetY - curY) * 0.25;
+
+        const gx = Math.round((curX - boardX - cellSize/2) / cellSize);
+        const gy = Math.round((curY - boardY - cellSize/2) / cellSize);
+
+        // Превью на сетке
         if (canFit(drag, gx, gy)) {
-            drag.blocks.forEach(b => grid[gy+b[1]][gx+b[0]] = drag.color);
-            drag.active = false;
-            
-            // Проверка линий
-            let rs = [], cs = [];
-            for(let r=0; r<GRID; r++) if(grid[r].every(v => v)) rs.push(r);
-            for(let c=0; c<GRID; c++) if(grid.every(r => r[c])) cs.push(c);
-            
-            if (rs.length + cs.length > 0) {
-                score += (rs.length + cs.length) * 120;
-                scoreEl.innerText = score;
-                rs.forEach(r => grid[r].fill(null));
-                cs.forEach(c => { for(let r=0; r<GRID; r++) grid[r][c] = null; });
-            }
-
-            if (shapes.every(s => !s.active)) spawnShapes();
-            else if (!canMove()) gameOver();
+            drag.blocks.forEach(b => {
+                drawBlock(boardX + (gx+b[0])*cellSize, boardY + (gy+b[1])*cellSize, drag.color, cellSize, 0.3);
+            });
         }
-        drag = null;
-    }
 
-    function gameOver() {
-        document.getElementById('overlay').style.display = 'flex';
-        document.getElementById('final-score').innerText = `СЧЕТ: ${score}`;
-        if (score > bestScore) {
-            localStorage.setItem('bb510_best', score);
-        }
-    }
-
-    const syncPos = (e) => {
-        const r = canvas.getBoundingClientRect();
-        const cx = e.touches ? e.touches[0].clientX : e.clientX;
-        const cy = e.touches ? e.touches[0].clientY : e.clientY;
-        mX = cx - r.left;
-        mY = cy - r.top;
-    };
-
-    canvas.addEventListener('touchstart', e => {
-        syncPos(e);
-        const slotW = parseFloat(canvas.style.width) / 3;
-        shapes.forEach(s => {
-            if (s.active && mY > boardSize + 100) {
-                if (mX > s.slot * slotW && mX < (s.slot+1)*slotW) drag = s;
-            }
+        // Сама фигура (приподнята над пальцем на 70px для удобства)
+        drag.blocks.forEach(b => {
+            const drawX = curX + (b[0] - 0.5) * cellSize;
+            const drawY = curY + (b[1] - 1.5) * cellSize - 70; 
+            drawBlock(drawX, drawY, drag.color, cellSize);
         });
-    });
-    window.addEventListener('touchmove', syncPos);
-    window.addEventListener('touchend', handleEnd);
+    }
+
+    requestAnimationFrame(render);
+}
+
+function handleEnd() {
+    if (!drag) return;
     
-    // Для ПК
-    canvas.addEventListener('mousedown', e => {
-        syncPos(e);
-        const slotW = parseFloat(canvas.style.width) / 3;
-        shapes.forEach(s => {
-            if (s.active && mY > boardSize + 100) {
-                if (mX > s.slot * slotW && mX < (s.slot+1)*slotW) drag = s;
-            }
-        });
-    });
-    window.addEventListener('mousemove', syncPos);
-    window.addEventListener('mouseup', handleEnd);
+    // При расчете места учитываем смещение -70px
+    const gx = Math.round((curX - boardX - cellSize/2) / cellSize);
+    const gy = Math.round((curY - 70 - boardY - cellSize/2) / cellSize);
 
-    window.onload = init;
-</script>
-</body>
-</html>
+    if (canFit(drag, gx, gy)) {
+        drag.blocks.forEach(b => grid[gy+b[1]][gx+b[0]] = drag.color);
+        drag.active = false;
+        
+        let fullRows = [], fullCols = [];
+        for(let r=0; r<GRID; r++) if(grid[r].every(v => v)) fullRows.push(r);
+        for(let c=0; c<GRID; c++) if(grid.every(r => r[c])) fullCols.push(c);
+        
+        const lines = fullRows.length + fullCols.length;
+        if (lines > 0) {
+            // КОМБО СИСТЕМА: бонус растет экспоненциально
+            // 1 линия = 100, 2 = 300, 3 = 600, 4 = 1000 и т.д.
+            const comboBonus = (lines * (lines + 1) / 2) * 100;
+            score += comboBonus;
+            
+            // Визуальный эффект
+            scoreEl.style.transform = 'scale(1.2)';
+            setTimeout(() => scoreEl.style.transform = 'scale(1)', 200);
+            
+            scoreEl.innerText = score;
+            fullRows.forEach(r => grid[r].fill(null));
+            fullCols.forEach(c => { for(let r=0; r<GRID; r++) grid[r][c] = null; });
+        } else {
+            score += drag.blocks.length; // Даем немного очков просто за установку
+            scoreEl.innerText = score;
+        }
+
+        if (shapes.every(s => !s.active)) spawnShapes();
+        else if (!canMoveAny()) gameOver();
+    }
+    drag = null;
+}
+
+function gameOver() {
+    document.getElementById('overlay').style.display = 'flex';
+    document.getElementById('final-score').innerText = `СЧЕТ: ${score}`;
+    if (score > bestScore) localStorage.setItem('bb_best_v2', score);
+}
+
+function updateMousePos(e) {
+    const rect = canvas.getBoundingClientRect();
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    targetX = clientX - rect.left;
+    targetY = clientY - rect.top;
+}
+
+canvas.addEventListener('touchstart', e => {
+    updateMousePos(e);
+    curX = targetX; curY = targetY; // Мгновенно перемещаем к началу касания
+    const slotW = canvas.offsetWidth / 3;
+    if (targetY > dockY - 40) {
+        const slotIdx = Math.floor(targetX / slotW);
+        const s = shapes.find(sh => sh.slot === slotIdx && sh.active);
+        if (s) drag = s;
+    }
+});
+
+window.addEventListener('touchmove', e => { if(drag) { updateMousePos(e); e.preventDefault(); } }, {passive: false});
+window.addEventListener('touchend', handleEnd);
+
+canvas.addEventListener('mousedown', e => {
+    updateMousePos(e);
+    curX = targetX; curY = targetY;
+    const slotW = canvas.offsetWidth / 3;
+    if (targetY > dockY - 40) {
+        const slotIdx = Math.floor(targetX / slotW);
+        const s = shapes.find(sh => sh.slot === slotIdx && sh.active);
+        if (s) drag = s;
+    }
+});
+window.addEventListener('mousemove', e => { if(drag) updateMousePos(e); });
+window.addEventListener('mouseup', handleEnd);
+
+window.addEventListener('resize', resize);
+resize();
+spawnShapes();
+render();
