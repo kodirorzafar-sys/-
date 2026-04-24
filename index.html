@@ -1,238 +1,314 @@
-const canvas = document.getElementById('gameCanvas');
-const ctx = canvas.getContext('2d');
-const scoreEl = document.getElementById('score');
-const bestEl = document.getElementById('best');
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Block Blast Gold Edition</title>
+    <style>
+        :root {
+            --bg-body: #d4a373; /* Глубокий песочно-коричневый */
+            --bg-app: #faedcd;  /* Светлый кремово-золотистый */
+            --grid-bg: #fefae0; /* Цвет пустых ячеек */
+            --accent: #bc6c25;  /* Насыщенный коричневый для текста */
+            --text-light: #dda15e;
+        }
+        * { box-sizing: border-box; touch-action: none; }
+        body {
+            background: var(--bg-body);
+            margin: 0; padding: 0;
+            display: flex; justify-content: center; align-items: center;
+            height: 100vh; overflow: hidden;
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        }
+        #app-container {
+            width: 100%; max-width: 480px; height: 100%;
+            background: var(--bg-app);
+            display: flex; flex-direction: column;
+            position: relative;
+            box-shadow: 0 0 40px rgba(0,0,0,0.2);
+        }
+        #header {
+            padding: 40px 0 20px;
+            text-align: center;
+            flex-shrink: 0;
+        }
+        #score { 
+            font-size: 70px; font-weight: 900; color: var(--accent); 
+            margin: 0; line-height: 1; transition: transform 0.2s cubic-bezier(0.17, 0.89, 0.32, 1.28);
+        }
+        #streak-info {
+            font-size: 18px; font-weight: 800; color: #cc5500;
+            height: 24px; margin-top: 10px; opacity: 0; transition: opacity 0.3s;
+            text-transform: uppercase; letter-spacing: 2px;
+        }
+        #best { font-size: 14px; color: var(--text-light); font-weight: 800; letter-spacing: 1px; }
 
-const GRID = 8;
-let grid = Array(GRID).fill().map(() => Array(GRID).fill(null));
-let score = 0;
-let bestScore = localStorage.getItem('bb_best_v2') || 0;
-let shapes = [];
-let drag = null;
+        #game-area { flex-grow: 1; position: relative; width: 100%; }
+        canvas { display: block; width: 100%; height: 100%; }
 
-// Координаты цели и текущие координаты (для плавности)
-let targetX = 0, targetY = 0;
-let curX = 0, curY = 0;
+        #overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(250, 237, 205, 0.98);
+            display: none; flex-direction: column; align-items: center; justify-content: center;
+            z-index: 100;
+        }
+        .btn-restart {
+            background: var(--accent); color: white; border: none;
+            padding: 20px 50px; font-size: 20px; border-radius: 12px;
+            font-weight: 800; cursor: pointer; text-transform: uppercase;
+        }
+    </style>
+</head>
+<body>
 
-let cellSize, boardSize, boardX, boardY, dockY, dockHeight;
+<div id="app-container">
+    <div id="header">
+        <div id="best">РЕКОРД: 0</div>
+        <h1 id="score">0</h1>
+        <div id="streak-info">COMBO x1</div>
+    </div>
 
-const COLORS = [
-    { m: '#FF5E57', s: '#D63031' }, { m: '#1DD1A1', s: '#10AC84' },
-    { m: '#54A0FF', s: '#2E86DE' }, { m: '#FECA57', s: '#FF9F43' },
-    { m: '#5F27CD', s: '#341F97' }, { m: '#00d2d3', s: '#01a3a4' }
-];
+    <div id="game-area">
+        <canvas id="gameCanvas"></canvas>
+    </div>
 
-function getRandomShape() {
-    const sets = [
-        [[0,0],[1,0],[2,0],[0,1],[1,1],[2,1],[0,2],[1,2],[2,2]], // 3x3
-        [[0,0],[1,0],[2,0],[0,1],[1,1],[2,1]], // 3x2
-        [[0,0],[1,0],[0,1],[1,1]], // 2x2
-        [[0,0],[0,1],[1,1]], // L
-        [[0,0],[1,0],[2,0]], // 3x1
-        [[0,0],[0,1],[0,2]], // 1x3
-        [[0,0],[1,0],[1,1],[2,1]], // Z
-        [[0,0]], // 1x1
-        [[0,0],[1,0]] // 2x1
+    <div id="overlay">
+        <h2 style="color: var(--accent); font-size: 32px; margin-bottom: 40px;">ИГРА ОКОНЧЕНА</h2>
+        <button class="btn-restart" onclick="location.reload()">ЗАНОВО</button>
+    </div>
+</div>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const scoreEl = document.getElementById('score');
+    const streakEl = document.getElementById('streak-info');
+
+    const GRID = 8;
+    const OFFSET_Y = 90; // Блок над пальцем
+    
+    let grid = Array(GRID).fill().map(() => Array(GRID).fill(null));
+    let score = 0;
+    let streak = 0;
+    let shapes = [];
+    let drag = null;
+    let targetX = 0, targetY = 0;
+    let curX = 0, curY = 0;
+
+    let cellSize, boardSize, boardX, boardY, dockY, dockHeight;
+
+    // Цвета как на твоем скриншоте (приятные и насыщенные)
+    const COLORS = [
+        { m: '#e63946' }, // Красный
+        { m: '#457b9d' }, // Синий
+        { m: '#f4a261' }, // Оранжево-желтый
+        { m: '#2a9d8f' }, // Зеленый
+        { m: '#8b5e34' }, // Твой коричневый
+        { m: '#6d597a' }  // Приятный фиолетовый
     ];
-    return sets[Math.floor(Math.random() * sets.length)];
-}
 
-function resize() {
-    const dpr = window.devicePixelRatio || 1;
-    const rect = canvas.parentElement.getBoundingClientRect();
-    canvas.width = rect.width * dpr;
-    canvas.height = rect.height * dpr;
-    ctx.scale(dpr, dpr);
-    boardSize = rect.width * 0.94;
-    cellSize = boardSize / GRID;
-    boardX = (rect.width - boardSize) / 2;
-    boardY = 10;
-    dockY = boardY + boardSize + 40;
-    dockHeight = rect.height - dockY;
-    bestEl.innerText = `РЕКОРД: ${bestScore}`;
-}
+    function getRandomShape() {
+        const sets = [
+            [[0,0],[1,0],[2,0],[0,1],[1,1],[2,1],[0,2],[1,2],[2,2]], 
+            [[0,0],[1,0],[2,0],[0,1],[1,1],[2,1]], 
+            [[0,0],[1,0],[0,1],[1,1]], 
+            [[0,0],[0,1],[1,1]], 
+            [[0,0],[1,0],[2,0]], 
+            [[0,0],[0,1],[0,2]], 
+            [[0,0],[1,0],[1,1],[2,1]], 
+            [[0,0]], 
+            [[0,0],[1,0]]
+        ];
+        return sets[Math.floor(Math.random() * sets.length)];
+    }
 
-function spawnShapes() {
-    shapes = [];
-    for (let i = 0; i < 3; i++) {
-        shapes.push({
-            blocks: getRandomShape(),
-            color: COLORS[Math.floor(Math.random() * COLORS.length)],
-            active: true,
-            slot: i
+    function resize() {
+        const dpr = window.devicePixelRatio || 1;
+        const rect = canvas.parentElement.getBoundingClientRect();
+        canvas.width = rect.width * dpr;
+        canvas.height = rect.height * dpr;
+        ctx.scale(dpr, dpr);
+        boardSize = rect.width * 0.94;
+        cellSize = boardSize / GRID;
+        boardX = (rect.width - boardSize) / 2;
+        boardY = 10;
+        dockY = boardY + boardSize + 60;
+        dockHeight = rect.height - dockY;
+    }
+
+    function spawnShapes() {
+        shapes = [];
+        for (let i = 0; i < 3; i++) {
+            shapes.push({
+                blocks: getRandomShape(),
+                color: COLORS[Math.floor(Math.random() * COLORS.length)],
+                active: true, slot: i
+            });
+        }
+        if (!canMoveAny()) gameOver();
+    }
+
+    function canFit(shape, gx, gy) {
+        return shape.blocks.every(b => {
+            let nx = gx + b[0], ny = gy + b[1];
+            return nx >= 0 && nx < GRID && ny >= 0 && ny < GRID && !grid[ny][nx];
         });
     }
-    if (!canMoveAny()) gameOver();
-}
 
-function canFit(shape, gx, gy) {
-    return shape.blocks.every(b => {
-        let nx = gx + b[0], ny = gy + b[1];
-        return nx >= 0 && nx < GRID && ny >= 0 && ny < GRID && !grid[ny][nx];
-    });
-}
-
-function canMoveAny() {
-    return shapes.some(s => {
-        if (!s.active) return false;
-        for (let r = 0; r < GRID; r++) {
-            for (let c = 0; c < GRID; c++) {
-                if (canFit(s, c, r)) return true;
+    function canMoveAny() {
+        return shapes.some(s => {
+            if (!s.active) return false;
+            for (let r = 0; r < GRID; r++) {
+                for (let c = 0; c < GRID; c++) {
+                    if (canFit(s, c, r)) return true;
+                }
             }
-        }
-        return false;
-    });
-}
-
-function drawBlock(x, y, color, size, alpha = 1) {
-    ctx.save();
-    ctx.globalAlpha = alpha;
-    ctx.fillStyle = color.m;
-    ctx.beginPath();
-    const r = size * 0.2;
-    ctx.roundRect(x + 1.5, y + 1.5, size - 3, size - 3, r);
-    ctx.fill();
-    ctx.fillStyle = 'rgba(255,255,255,0.15)';
-    ctx.fillRect(x + size*0.2, y + size*0.15, size*0.6, size*0.15);
-    ctx.restore();
-}
-
-function render() {
-    const rect = canvas.parentElement.getBoundingClientRect();
-    ctx.clearRect(0, 0, rect.width, rect.height);
-
-    // Сетка
-    for (let r = 0; r < GRID; r++) {
-        for (let c = 0; c < GRID; c++) {
-            ctx.fillStyle = '#f0f0f0';
-            ctx.beginPath();
-            ctx.roundRect(boardX + c*cellSize + 1, boardY + r*cellSize + 1, cellSize - 2, cellSize - 2, 6);
-            ctx.fill();
-            if (grid[r][c]) drawBlock(boardX + c*cellSize, boardY + r*cellSize, grid[r][c], cellSize);
-        }
+            return false;
+        });
     }
 
-    // Фигуры в доке
-    const slotW = rect.width / 3;
-    shapes.forEach(s => {
-        if (!s.active || s === drag) return;
-        const miniSize = cellSize * 0.7;
-        const sW = Math.max(...s.blocks.map(b => b[0])) * miniSize;
-        const sH = Math.max(...s.blocks.map(b => b[1])) * miniSize;
-        const x = s.slot * slotW + (slotW - sW) / 2 - miniSize/2;
-        const y = dockY + (dockHeight/2 - sH/2) - miniSize/2;
-        s.blocks.forEach(b => drawBlock(x + b[0]*miniSize, y + b[1]*miniSize, s.color, miniSize));
-    });
+    // РИСУЕМ КВАДРАТ (Острые углы)
+    function drawBlock(x, y, color, size, alpha = 1) {
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = color.m;
+        
+        const gap = size * 0.06; // Маленький зазор между кубиками
+        ctx.fillRect(x + gap, y + gap, size - gap*2, size - gap*2);
+        
+        // Матовый блик для красоты
+        ctx.fillStyle = 'rgba(255,255,255,0.15)';
+        ctx.fillRect(x + gap + size*0.1, y + gap + size*0.05, size*0.7, size*0.1);
+        ctx.restore();
+    }
 
-    // Перетаскивание
-    if (drag) {
-        // Плавное следование (Lerp)
-        curX += (targetX - curX) * 0.25;
-        curY += (targetY - curY) * 0.25;
+    function render() {
+        const rect = canvas.parentElement.getBoundingClientRect();
+        ctx.clearRect(0, 0, rect.width, rect.height);
 
-        const gx = Math.round((curX - boardX - cellSize/2) / cellSize);
-        const gy = Math.round((curY - boardY - cellSize/2) / cellSize);
+        // Сетка
+        for (let r = 0; r < GRID; r++) {
+            for (let c = 0; c < GRID; c++) {
+                ctx.fillStyle = '#e9d8a6'; // Цвет пустых клеток
+                ctx.fillRect(boardX + c*cellSize + 1, boardY + r*cellSize + 1, cellSize - 2, cellSize - 2);
+                if (grid[r][c]) drawBlock(boardX + c*cellSize, boardY + r*cellSize, grid[r][c], cellSize);
+            }
+        }
 
-        // Превью на сетке
-        if (canFit(drag, gx, gy)) {
+        // Фигуры внизу
+        const slotW = rect.width / 3;
+        shapes.forEach(s => {
+            if (!s.active || s === drag) return;
+            const miniSize = cellSize * 0.7;
+            const sW = Math.max(...s.blocks.map(b => b[0])) * miniSize;
+            const sH = Math.max(...s.blocks.map(b => b[1])) * miniSize;
+            const x = s.slot * slotW + (slotW - sW) / 2 - miniSize/2;
+            const y = dockY + (dockHeight/2 - sH/2) - miniSize/2;
+            s.blocks.forEach(b => drawBlock(x + b[0]*miniSize, y + b[1]*miniSize, s.color, miniSize));
+        });
+
+        if (drag) {
+            curX += (targetX - curX) * 0.35;
+            curY += (targetY - curY) * 0.35;
+
+            const vY = curY - OFFSET_Y;
+            const gx = Math.round((curX - boardX - cellSize/2) / cellSize);
+            const gy = Math.round((vY - boardY - cellSize/2) / cellSize);
+
+            // Тень (превью)
+            if (canFit(drag, gx, gy)) {
+                drag.blocks.forEach(b => {
+                    drawBlock(boardX + (gx+b[0])*cellSize, boardY + (gy+b[1])*cellSize, drag.color, cellSize, 0.2);
+                });
+            }
+
+            // Блок в руке
             drag.blocks.forEach(b => {
-                drawBlock(boardX + (gx+b[0])*cellSize, boardY + (gy+b[1])*cellSize, drag.color, cellSize, 0.3);
+                const drawX = curX + (b[0] - 0.5) * cellSize;
+                const drawY = vY + (b[1] - 0.5) * cellSize; 
+                drawBlock(drawX, drawY, drag.color, cellSize);
             });
         }
 
-        // Сама фигура (приподнята над пальцем на 70px для удобства)
-        drag.blocks.forEach(b => {
-            const drawX = curX + (b[0] - 0.5) * cellSize;
-            const drawY = curY + (b[1] - 1.5) * cellSize - 70; 
-            drawBlock(drawX, drawY, drag.color, cellSize);
-        });
+        requestAnimationFrame(render);
     }
 
-    requestAnimationFrame(render);
-}
+    function handleEnd() {
+        if (!drag) return;
+        const vY = curY - OFFSET_Y;
+        const gx = Math.round((curX - boardX - cellSize/2) / cellSize);
+        const gy = Math.round((vY - boardY - cellSize/2) / cellSize);
 
-function handleEnd() {
-    if (!drag) return;
-    
-    // При расчете места учитываем смещение -70px
-    const gx = Math.round((curX - boardX - cellSize/2) / cellSize);
-    const gy = Math.round((curY - 70 - boardY - cellSize/2) / cellSize);
+        if (canFit(drag, gx, gy)) {
+            drag.blocks.forEach(b => grid[gy+b[1]][gx+b[0]] = drag.color);
+            drag.active = false;
+            
+            let fullRows = [], fullCols = [];
+            for(let r=0; r<GRID; r++) if(grid[r].every(v => v)) fullRows.push(r);
+            for(let c=0; c<GRID; c++) if(grid.every(r => r[c])) fullCols.push(c);
+            
+            const totalLines = fullRows.length + fullCols.length;
+            if (totalLines > 0) {
+                streak++;
+                score += (totalLines * 100) * streak;
+                scoreEl.innerText = score;
+                scoreEl.style.transform = 'scale(1.2)';
+                streakEl.innerText = `COMBO x${streak}`;
+                streakEl.style.opacity = '1';
+                setTimeout(() => scoreEl.style.transform = 'scale(1)', 200);
 
-    if (canFit(drag, gx, gy)) {
-        drag.blocks.forEach(b => grid[gy+b[1]][gx+b[0]] = drag.color);
-        drag.active = false;
-        
-        let fullRows = [], fullCols = [];
-        for(let r=0; r<GRID; r++) if(grid[r].every(v => v)) fullRows.push(r);
-        for(let c=0; c<GRID; c++) if(grid.every(r => r[c])) fullCols.push(c);
-        
-        const lines = fullRows.length + fullCols.length;
-        if (lines > 0) {
-            // КОМБО СИСТЕМА: бонус растет экспоненциально
-            // 1 линия = 100, 2 = 300, 3 = 600, 4 = 1000 и т.д.
-            const comboBonus = (lines * (lines + 1) / 2) * 100;
-            score += comboBonus;
-            
-            // Визуальный эффект
-            scoreEl.style.transform = 'scale(1.2)';
-            setTimeout(() => scoreEl.style.transform = 'scale(1)', 200);
-            
-            scoreEl.innerText = score;
-            fullRows.forEach(r => grid[r].fill(null));
-            fullCols.forEach(c => { for(let r=0; r<GRID; r++) grid[r][c] = null; });
-        } else {
-            score += drag.blocks.length; // Даем немного очков просто за установку
-            scoreEl.innerText = score;
+                fullRows.forEach(r => grid[r].fill(null));
+                fullCols.forEach(c => { for(let r=0; r<GRID; r++) grid[r][c] = null; });
+            } else {
+                streak = 0; streakEl.style.opacity = '0';
+                score += drag.blocks.length; 
+                scoreEl.innerText = score;
+            }
+
+            if (shapes.every(s => !s.active)) spawnShapes();
+            else if (!canMoveAny()) gameOver();
         }
-
-        if (shapes.every(s => !s.active)) spawnShapes();
-        else if (!canMoveAny()) gameOver();
+        drag = null;
     }
-    drag = null;
-}
 
-function gameOver() {
-    document.getElementById('overlay').style.display = 'flex';
-    document.getElementById('final-score').innerText = `СЧЕТ: ${score}`;
-    if (score > bestScore) localStorage.setItem('bb_best_v2', score);
-}
-
-function updateMousePos(e) {
-    const rect = canvas.getBoundingClientRect();
-    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-    targetX = clientX - rect.left;
-    targetY = clientY - rect.top;
-}
-
-canvas.addEventListener('touchstart', e => {
-    updateMousePos(e);
-    curX = targetX; curY = targetY; // Мгновенно перемещаем к началу касания
-    const slotW = canvas.offsetWidth / 3;
-    if (targetY > dockY - 40) {
-        const slotIdx = Math.floor(targetX / slotW);
-        const s = shapes.find(sh => sh.slot === slotIdx && sh.active);
-        if (s) drag = s;
+    function gameOver() {
+        document.getElementById('overlay').style.display = 'flex';
     }
-});
 
-window.addEventListener('touchmove', e => { if(drag) { updateMousePos(e); e.preventDefault(); } }, {passive: false});
-window.addEventListener('touchend', handleEnd);
-
-canvas.addEventListener('mousedown', e => {
-    updateMousePos(e);
-    curX = targetX; curY = targetY;
-    const slotW = canvas.offsetWidth / 3;
-    if (targetY > dockY - 40) {
-        const slotIdx = Math.floor(targetX / slotW);
-        const s = shapes.find(sh => sh.slot === slotIdx && sh.active);
-        if (s) drag = s;
+    function updatePos(e) {
+        const rect = canvas.getBoundingClientRect();
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+        targetX = clientX - rect.left;
+        targetY = clientY - rect.top;
     }
-});
-window.addEventListener('mousemove', e => { if(drag) updateMousePos(e); });
-window.addEventListener('mouseup', handleEnd);
 
-window.addEventListener('resize', resize);
-resize();
-spawnShapes();
-render();
+    canvas.addEventListener('touchstart', e => {
+        updatePos(e); curX = targetX; curY = targetY;
+        const slotW = canvas.offsetWidth / 3;
+        if (targetY > dockY - 40) {
+            const slotIdx = Math.floor(targetX / slotW);
+            const s = shapes.find(sh => sh.slot === slotIdx && sh.active);
+            if (s) drag = s;
+        }
+    });
+    window.addEventListener('touchmove', e => { if(drag) { updatePos(e); e.preventDefault(); } }, {passive: false});
+    window.addEventListener('touchend', handleEnd);
+    
+    canvas.addEventListener('mousedown', e => {
+        updatePos(e); curX = targetX; curY = targetY;
+        const slotW = canvas.offsetWidth / 3;
+        if (targetY > dockY - 40) {
+            const slotIdx = Math.floor(targetX / slotW);
+            const s = shapes.find(sh => sh.slot === slotIdx && sh.active);
+            if (s) drag = s;
+        }
+    });
+    window.addEventListener('mousemove', e => { if(drag) updatePos(e); });
+    window.addEventListener('mouseup', handleEnd);
+
+    window.addEventListener('resize', resize);
+    resize(); spawnShapes(); render();
+</script>
+</body>
+</html>
